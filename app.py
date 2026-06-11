@@ -394,9 +394,8 @@ with tab5:
         # Clean the expense column to do math
         pending_df['Clean_Expense'] = pd.to_numeric(pending_df['Expense'].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
         
-        # Filter for rows that are expenses AND contain "Pending" in their Internal Status
-        unpaid_claims = pending_df[(pending_df['Clean_Expense'] > 0) & (pending_df['Internal Status'].str.contains('Pending', case=False, na=False))]
-        
+        # FIX: Filter for rows that are expenses AND do NOT contain "Cleared" in their Internal Status
+        unpaid_claims = pending_df[(pending_df['Clean_Expense'] > 0) & (~pending_df['Internal Status'].str.contains('Cleared', case=False, na=False))]        
         if not unpaid_claims.empty:
             # 1. Show the Summary grouped by Person
             st.subheader("Summary by Claimant")
