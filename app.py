@@ -122,7 +122,6 @@ with tab2:
             st.divider()
             st.subheader("📤 Publish Formatted Sheet")
             
-            # Form Inputs for Signatures and Logos
             logo_ieee_url = st.text_input("IEEE Logo URL (ending in .png/.jpg)", value="https://github.com/SeanTai123/ieee-treasurer/blob/main/ieee.png?raw=true")
             logo_sa_url = st.text_input("SA Logo URL (ending in .png/.jpg)", value="https://github.com/SeanTai123/ieee-treasurer/blob/main/SA.png?raw=true")
             
@@ -139,7 +138,7 @@ with tab2:
             sig_date = st.date_input("Signature Date").strftime('%d/%m/%Y')
 
             if st.button(f"Generate '{selected_month}' Tab"):
-                with st.spinner("Building SA layout, injecting images, and formatting..."):
+                with st.spinner("Building SA layout, applying borders, and merging cells..."):
                     try:
                         # 1. Calculate Opening Balance
                         first_txn_idx = month_df.index[0]
@@ -153,15 +152,14 @@ with tab2:
                             opening_balance = first_bal - first_inc + first_exp
 
                         # 2. Prepare Image Formulas
-                        # The '1' in the formula tells Google Sheets to resize the image to fit inside the merged cell
                         ieee_formula = f'=IMAGE("{logo_ieee_url}", 1)' if logo_ieee_url else ""
                         sa_formula = f'=IMAGE("{logo_sa_url}", 1)' if logo_sa_url else ""
                         prep_sig_formula = f'=IMAGE("{prep_sig_url}", 1)' if prep_sig_url else ""
                         ver_sig_formula = f'=IMAGE("{ver_sig_url}", 1)' if ver_sig_url else ""
 
-                        # 3. Construct the Layout (Matching the screenshot)
+                        # 3. Construct the Layout
                         sa_layout = [
-                            [ieee_formula, "", "", "", "", sa_formula, ""], # Row 1 (Logos)
+                            [ieee_formula, "", "", "", "", sa_formula, ""], # Row 1
                             ["", "", "", "", "", "", ""],                   # Row 2
                             ["", "", "", "", "", "", ""],                   # Row 3
                             ["IEEE UNM Student Branch", "", "", "", "", "", ""], # Row 4
@@ -172,61 +170,86 @@ with tab2:
                             [month_df.iloc[0]['Date'].strftime('%Y-%m-%d'), "Opening Balance", "", "", "", "", f"{opening_balance:.2f}"] # Row 9
                         ]
 
-                        # Add transactions
                         for _, row in month_df.iterrows():
                             inc = f"{row['Clean_Income']:.2f}" if row['Clean_Income'] > 0 else ""
                             exp = f"{row['Clean_Expense']:.2f}" if row['Clean_Expense'] > 0 else ""
                             bal = f"{float(str(row['Running Balance']).replace('RM', '').replace(',', '').strip()):.2f}"
                             sa_layout.append([
                                 row['Date'].strftime('%Y-%m-%d'),
-                                row['Description'],
-                                inc, exp, "", row['Notes'], bal
+                                row['Description'], inc, exp, "", row['Notes'], bal
                             ])
 
-                        # Add bottom summary and signatures
+                        # Connect the TOTAL line directly to the data to form a complete table block
+                        total_row_idx = len(sa_layout) + 1
+                        sa_layout.append(["", "", "", "", "", "TOTAL: ", f"{internal_closing:.2f}"])
+
+                        # Gap and Signatures
                         sa_layout.extend([
                             ["", "", "", "", "", "", ""],
-                            ["", "", "", "", "", "TOTAL: ", f"{internal_closing:.2f}"],
                             ["", "", "", "", "", "", ""],
-                            # Signature Image Row (If URLs are provided)
                             [prep_sig_formula, "", "", ver_sig_formula, "", "", ""],
                             [f"Prepared by: {prep_name}", "", "", f"Verified by: {ver_name}", "", "", ""],
                             [f"Email Username: {prep_email}", "", "", f"Email Username: {ver_email}", "", "", ""],
                             [f"Date: {sig_date}", "", "", f"Date: {sig_date}", "", "", ""]
                         ])
 
-                        # 4. Create or Overwrite the Worksheet
+                        # 4. Create/Update Worksheet
                         sheet_title = f"Ledger {selected_month}"
                         try:
                             target_sheet = client.open_by_url(SHEET_URL).worksheet(sheet_title)
                             target_sheet.clear()
                         except gspread.exceptions.WorksheetNotFound:
-                            target_sheet = client.open_by_url(SHEET_URL).add_worksheet(title=sheet_title, rows=len(sa_layout)+10, cols=8)
+                            target_sheet = client.open_by_url(SHEET_URL).add_worksheet(title=sheet_title, rows=len(sa_layout)+5, cols=8)
 
-                        # Push data
                         target_sheet.update(range_name='A1', values=sa_layout, value_input_option='USER_ENTERED')
                         
-                        # 5. Apply Visual Formatting 
-                        # Merge cells for logos (A1:B3 for IEEE, F1:G3 for SA)
+                        # 5. Apply Visual Formatting
+                        # Logos
                         target_sheet.merge_cells('A1:B3')
                         target_sheet.merge_cells('F1:G3')
                         
-                        # Merge cells for signatures so they have space
-                        sig_row = len(sa_layout) - 3 # Row index where signatures are
+                        # Merge & Center Main Titles
+                        target_sheet.merge_cells('A4:G4')
+                        target_sheet.merge_cells('A5:G5')
+                        target_sheet.format('A4:A5', {
+                            'horizontalAlignment': 'CENTER',
+                            'textFormat': {'bold': True, 'fontSize': 12}
+                        })
+
+                        # Merge Table Headers (Vertically)
+                        target_sheet.merge_cells('A7:A8') # Date
+                        target_sheet.merge_cells('B7:B8') # Details
+                        target_sheet.merge_cells('E7:E8') # OR No
+                        target_sheet.merge_cells('F7:F8') # CS-PV No
+                        
+                        target_sheet.format('A7:G8', {
+                            'horizontalAlignment': 'CENTER',
+                            'verticalAlignment': 'MIDDLE',
+                            'textFormat': {'bold': True}
+                        })
+
+                        # Format TOTAL Row
+                        target_sheet.format(f'A{total_row_idx}:G{total_row_idx}', {'textFormat': {'bold': True}})
+
+                        # Draw Borders around the Table (A7 to G[Total])
+                        solid_border = {"style": "SOLID", "color": {"red": 0.0, "green": 0.0, "blue": 0.0}}
+                        target_sheet.format(f'A7:G{total_row_idx}', {
+                            "borders": {
+                                "top": solid_border,
+                                "bottom": solid_border,
+                                "left": solid_border,
+                                "right": solid_border,
+                                "innerHorizontal": solid_border,
+                                "innerVertical": solid_border
+                            }
+                        })
+
+                        # Merge Signatures
+                        sig_row = len(sa_layout) - 3 
                         target_sheet.merge_cells(f'A{sig_row}:B{sig_row+1}') 
                         target_sheet.merge_cells(f'D{sig_row}:E{sig_row+1}')
 
-                        # Bold the Headers and the TOTAL line
-                        target_sheet.format('A4:A5', {'textFormat': {'bold': True}})
-                        target_sheet.format('A7:G8', {'textFormat': {'bold': True}, 'horizontalAlignment': 'CENTER'})
-                        total_row = len(sa_layout) - 5
-                        target_sheet.format(f'F{total_row}:G{total_row}', {'textFormat': {'bold': True}})
-                        
-                        # Set column widths (Approximate, you can tweak these later in Sheets)
-                        # gspread standard column resize requires a slightly more complex batch update, 
-                        # but standard text length usually auto-stretches decently.
-
-                        st.success(f"✅ Successfully formatted and published '{sheet_title}' with logos!")
+                        st.success(f"✅ Successfully formatted and published '{sheet_title}' with merged headers and borders!")
                         st.markdown(f"[Click here to check your Google Sheet]({SHEET_URL})")
 
                     except Exception as e:
