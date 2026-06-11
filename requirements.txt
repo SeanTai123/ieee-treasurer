@@ -5,3 +5,4 @@ pandas
 docxtpl
 python-docx
 requests
+plotly

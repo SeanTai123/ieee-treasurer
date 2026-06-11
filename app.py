@@ -8,6 +8,7 @@ import requests
 import base64
 from docx import Document
 from docx.shared import Mm
+import plotly.express as px
 
 # --- 1. CONFIGURATION ---
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1kBFKNBkSNLJS4-qJrZ1QfhRGMkyGJCEft0T89JreTXw/edit?usp=sharing" 
@@ -30,7 +31,8 @@ sheet = client.open_by_url(SHEET_URL).sheet1
 st.set_page_config(page_title="IEEE Treasury App", page_icon="💸", layout="wide")
 st.title("💸 IEEE Treasury Management")
 
-tab1, tab2, tab3 = st.tabs(["📝 Submit Claim", "📊 Monthly Ledger (SA)", "📄 Generate Word Tracker"])
+# We now have 4 Tabs!
+tab1, tab2, tab3, tab4 = st.tabs(["📝 Submit Claim", "📊 Monthly Ledger", "📄 Word Tracker", "📈 Dashboard"])
 
 # ==========================================
 # TAB 1: CLAIM SUBMISSION 
@@ -227,7 +229,7 @@ with tab2:
                     st.success(f"✅ Generated '{sheet_title}'!")
 
 # ==========================================
-# TAB 3: PURE PYTHON WORD DOCUMENT GENERATOR 
+# TAB 3: WORD DOCUMENT GENERATOR 
 # ==========================================
 with tab3:
     st.header("📄 Payment Receipt Tracker Generator")
@@ -243,25 +245,17 @@ with tab3:
             if st.button("Generate Word Document"):
                 with st.spinner("Downloading images and building document from scratch... this may take a minute."):
                     try:
-                        # 1. Create a fresh Word Document
                         doc = Document()
-                        
-                        # Add a clean Title
                         doc.add_heading("Payment Receipt Tracker", level=1)
                         doc.add_paragraph(f"Monthly Ledger: {doc_month}\n")
                         
-                        # Filter for Expenses in the chosen month
-                        month_data = valid_dates_tab3[valid_dates_tab3['Date'].dt.strftime('%B %Y') == doc_month]
+                        month_data = valid_dates_tab3[valid_dates_tab3['Date'].dt.strftime('%B %Y') == doc_month].copy()
+                        month_data['Clean_Expense'] = pd.to_numeric(month_data['Expense'].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
+                        expenses = month_data[month_data['Clean_Expense'] > 0]
                         
-                        # Bulletproof filter: Only grab rows where Expense is a number greater than 0
-                        month_data['Safe_Expense'] = pd.to_numeric(month_data['Expense'], errors='coerce').fillna(0)
-                        expenses = month_data[month_data['Safe_Expense'] > 0]
-                        
-                        # 2. Draw the Table
                         table = doc.add_table(rows=1, cols=4)
-                        table.style = 'Table Grid' # Built-in Word styling with borders
+                        table.style = 'Table Grid'
                         
-                        # Set Table Headers
                         hdr_cells = table.rows[0].cells
                         hdr_cells[0].text = 'No'
                         hdr_cells[1].text = 'Receipt'
@@ -269,15 +263,10 @@ with tab3:
                         hdr_cells[3].text = 'Claim'
                         
                         counter = 1
-                        
-                        # 3. Populate Rows
                         for _, row in expenses.iterrows():
                             row_cells = table.add_row().cells
-                            
-                            # Column 1: Number
                             row_cells[0].text = str(counter)
                             
-                            # Column 2: Image
                             file_url = str(row.get('Receipt/Invoice No.', row.get('Receipt Proof', '')))
                             img_paragraph = row_cells[1].paragraphs[0]
                             
@@ -286,7 +275,6 @@ with tab3:
                                     img_response = requests.get(file_url)
                                     if img_response.status_code == 200:
                                         fh = io.BytesIO(img_response.content)
-                                        # Insert image directly into the cell!
                                         img_paragraph.add_run().add_picture(fh, width=Mm(55))
                                     else:
                                         img_paragraph.text = "[Image Error]"
@@ -295,28 +283,23 @@ with tab3:
                             else:
                                 img_paragraph.text = "[No Image Attached]"
                                 
-                            # Column 3: Name and Details
-                            row_cells[2].text = f"{row['Payee/Payer']}\nRM {row['Expense']}\n({row['Description']})"
-                            
-                            # Column 4: Status
+                            row_cells[2].text = f"{row['Payee/Payer']}\nRM {row['Clean_Expense']:.2f}\n({row['Description']})"
                             status = "Refunded to purchaser" if "Cleared" in str(row['Internal Status']) else "Pending PV Submission"
                             row_cells[3].text = status
-                            
                             counter += 1
                         
-                        # 4. Save to Memory Buffer
-                        bio = io.BytesIO()
-                        doc.save(bio)
+                        temp_file_name = f"temp_{doc_month.replace(' ', '_')}.docx"
+                        doc.save(temp_file_name)
                         
-                        # FIX: Save the document into the app's memory (session_state) so it survives the refresh!
-                        st.session_state['ready_doc'] = bio.getvalue()
+                        with open(temp_file_name, "rb") as f:
+                            st.session_state['ready_doc'] = f.read()
+                            
                         st.session_state['ready_month'] = doc_month
                         st.success("✅ Document generated successfully! Click below to download.")
                         
                     except Exception as e:
                         st.error(f"Failed to generate document. Error: {e}")
             
-            # FIX: Show the download button OUTSIDE the Generate button loop.
             if 'ready_doc' in st.session_state and st.session_state.get('ready_month') == doc_month:
                 st.download_button(
                     label="⬇️ Download Payment Tracker (.docx)",
@@ -325,3 +308,91 @@ with tab3:
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     type="primary"
                 )
+
+# ==========================================
+# TAB 4: FINANCIAL DASHBOARD (NEW)
+# ==========================================
+with tab4:
+    st.header("📈 Financial Dashboard")
+    st.markdown("Live overview of the club's financial health.")
+    
+    if records:
+        dash_df = pd.DataFrame(records)
+        dash_df['Date'] = pd.to_datetime(dash_df['Date'], errors='coerce')
+        
+        # Clean numeric columns
+        dash_df['Clean_Income'] = pd.to_numeric(dash_df['Income'].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
+        dash_df['Clean_Expense'] = pd.to_numeric(dash_df['Expense'].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
+        
+        # Filter out "Opening Balance" from Income so charts aren't skewed
+        real_income_df = dash_df[(dash_df['Clean_Income'] > 0) & (~dash_df['Description'].str.contains('Opening Balance', case=False, na=False))]
+        
+        # --- 1. Top Metrics ---
+        total_real_income = real_income_df['Clean_Income'].sum()
+        total_expense = dash_df['Clean_Expense'].sum()
+        
+        current_balance_str = str(dash_df.iloc[-1]['Running Balance']).replace('RM', '').replace(',', '').strip()
+        current_balance = float(current_balance_str) if current_balance_str else 0.0
+        
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("💰 Current Balance", f"RM {current_balance:,.2f}")
+        col_m2.metric("🟢 Total Revenue Generated", f"RM {total_real_income:,.2f}")
+        col_m3.metric("🔴 Total Expenses", f"RM {total_expense:,.2f}")
+        
+        st.divider()
+        
+        # --- 2. Interactive Charts ---
+        col_chart1, col_chart2 = st.columns(2)
+        
+        with col_chart1:
+            st.subheader("Expenses by Category")
+            expense_df = dash_df[dash_df['Clean_Expense'] > 0]
+            if not expense_df.empty:
+                # Group by Category for a clean Pie Chart
+                cat_expense = expense_df.groupby('Category')['Clean_Expense'].sum().reset_index()
+                fig_pie = px.pie(cat_expense, values='Clean_Expense', names='Category', hole=0.4, 
+                                 color_discrete_sequence=px.colors.sequential.RdBu)
+                st.plotly_chart(fig_pie, use_container_width=True)
+            else:
+                st.info("No expenses recorded yet.")
+                
+        with col_chart2:
+            st.subheader("Monthly Cashflow")
+            valid_dash_dates = dash_df.dropna(subset=['Date']).copy()
+            if not valid_dash_dates.empty:
+                valid_dash_dates['Month'] = valid_dash_dates['Date'].dt.strftime('%b %Y')
+                
+                # We need to group income (excluding opening balance) and expenses by month
+                monthly_exp = valid_dash_dates.groupby('Month')['Clean_Expense'].sum().reset_index()
+                monthly_inc = real_income_df.copy()
+                monthly_inc['Month'] = monthly_inc['Date'].dt.strftime('%b %Y')
+                monthly_inc = monthly_inc.groupby('Month')['Clean_Income'].sum().reset_index()
+                
+                # Merge them together for the bar chart
+                monthly_merged = pd.merge(monthly_exp, monthly_inc, on='Month', how='outer').fillna(0)
+                
+                if not monthly_merged.empty:
+                    fig_bar = px.bar(monthly_merged, x='Month', y=['Clean_Income', 'Clean_Expense'], 
+                                     barmode='group', 
+                                     labels={'value': 'Amount (RM)', 'variable': 'Cashflow Type'},
+                                     color_discrete_map={'Clean_Income': '#2ECC71', 'Clean_Expense': '#E74C3C'})
+                    
+                    # Rename the legend properly
+                    newnames = {'Clean_Income': 'Income', 'Clean_Expense': 'Expense'}
+                    fig_bar.for_each_trace(lambda t: t.update(name = newnames[t.name],
+                                                              legendgroup = newnames[t.name],
+                                                              hovertemplate = t.hovertemplate.replace(t.name, newnames[t.name])))
+                                                              
+                    st.plotly_chart(fig_bar, use_container_width=True)
+                else:
+                    st.info("Not enough data for cashflow chart.")
+            else:
+                st.info("No dated transactions recorded yet.")
+                
+        st.divider()
+        st.subheader("Recent Transactions")
+        display_df = dash_df[['Date', 'Description', 'Category', 'Income', 'Expense', 'Running Balance']].tail(5).iloc[::-1]
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        
+    else:
+        st.info("No records found in the Master Ledger.")
