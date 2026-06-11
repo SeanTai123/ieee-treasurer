@@ -79,10 +79,13 @@ with tab1:
                     file_id = "No Receipt"
                     if receipt_file is not None:
                         file_metadata = {
-                            'name': f"{new_id}_{payee}.jpg",
+                            'name': f"{new_id}_{payee}.{receipt_file.name.split('.')[-1]}",
                             'parents': [DRIVE_FOLDER_ID]
                         }
-                        media = MediaIoBaseUpload(receipt_file, mimetype=receipt_file.type, resumable=True)
+                        # Convert Streamlit file to a standard Byte Stream for Google API
+                        file_stream = io.BytesIO(receipt_file.getvalue())
+                        media = MediaIoBaseUpload(file_stream, mimetype=receipt_file.type, resumable=True)
+                        
                         uploaded_file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
                         file_id = uploaded_file.get('id')
 
