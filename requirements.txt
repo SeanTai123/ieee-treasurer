@@ -2,3 +2,6 @@ streamlit
 gspread
 google-auth
 pandas
+docxtpl
+python-docx
+google-api-python-client
