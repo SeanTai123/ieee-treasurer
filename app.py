@@ -1,13 +1,13 @@
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 import pandas as pd
 from datetime import datetime
 import io
 from docxtpl import DocxTemplate, InlineImage
 from docx.shared import Mm
+import requests
+import base64
 
 # --- 1. CONFIGURATION ---
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1kBFKNBkSNLJS4-qJrZ1QfhRGMkyGJCEft0T89JreTXw/edit?usp=sharing" 
@@ -26,8 +26,6 @@ credentials = Credentials.from_service_account_info(
 # Connect Sheets
 client = gspread.authorize(credentials)
 sheet = client.open_by_url(SHEET_URL).sheet1
-# Connect Drive
-drive_service = build('drive', 'v3', credentials=credentials)
 
 # --- 3. UI SETUP ---
 st.set_page_config(page_title="IEEE Treasury App", page_icon="💸", layout="wide")
