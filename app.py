@@ -171,6 +171,11 @@ with tab2:
                         ]
 
                         for _, row in month_df.iterrows():
+                            # Skip the database entry if it's the Opening Balance 
+                            # because we already printed the SA-formatted one above.
+                            if "opening balance" in str(row['Description']).lower():
+                                continue
+                                
                             inc = f"{row['Clean_Income']:.2f}" if row['Clean_Income'] > 0 else ""
                             exp = f"{row['Clean_Expense']:.2f}" if row['Clean_Expense'] > 0 else ""
                             bal = f"{float(str(row['Running Balance']).replace('RM', '').replace(',', '').strip()):.2f}"
