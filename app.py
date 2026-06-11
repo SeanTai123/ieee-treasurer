@@ -179,7 +179,6 @@ with tab2:
                                 row['Description'], inc, exp, "", row['Notes'], bal
                             ])
 
-                        # Connect the TOTAL line directly to the data to form a complete table block
                         total_row_idx = len(sa_layout) + 1
                         sa_layout.append(["", "", "", "", "", "TOTAL: ", f"{internal_closing:.2f}"])
 
@@ -204,11 +203,9 @@ with tab2:
                         target_sheet.update(range_name='A1', values=sa_layout, value_input_option='USER_ENTERED')
                         
                         # 5. Apply Visual Formatting
-                        # Logos
                         target_sheet.merge_cells('A1:B3')
                         target_sheet.merge_cells('F1:G3')
                         
-                        # Merge & Center Main Titles
                         target_sheet.merge_cells('A4:G4')
                         target_sheet.merge_cells('A5:G5')
                         target_sheet.format('A4:A5', {
@@ -216,11 +213,10 @@ with tab2:
                             'textFormat': {'bold': True, 'fontSize': 12}
                         })
 
-                        # Merge Table Headers (Vertically)
-                        target_sheet.merge_cells('A7:A8') # Date
-                        target_sheet.merge_cells('B7:B8') # Details
-                        target_sheet.merge_cells('E7:E8') # OR No
-                        target_sheet.merge_cells('F7:F8') # CS-PV No
+                        target_sheet.merge_cells('A7:A8') 
+                        target_sheet.merge_cells('B7:B8') 
+                        target_sheet.merge_cells('E7:E8') 
+                        target_sheet.merge_cells('F7:F8') 
                         
                         target_sheet.format('A7:G8', {
                             'horizontalAlignment': 'CENTER',
@@ -228,28 +224,24 @@ with tab2:
                             'textFormat': {'bold': True}
                         })
 
-                        # Format TOTAL Row
                         target_sheet.format(f'A{total_row_idx}:G{total_row_idx}', {'textFormat': {'bold': True}})
 
-                        # Draw Borders around the Table (A7 to G[Total])
+                        # THE FIX: Apply top, bottom, left, and right. gspread will automatically apply this to every cell in the range, creating a full grid!
                         solid_border = {"style": "SOLID", "color": {"red": 0.0, "green": 0.0, "blue": 0.0}}
                         target_sheet.format(f'A7:G{total_row_idx}', {
                             "borders": {
                                 "top": solid_border,
                                 "bottom": solid_border,
                                 "left": solid_border,
-                                "right": solid_border,
-                                "innerHorizontal": solid_border,
-                                "innerVertical": solid_border
+                                "right": solid_border
                             }
                         })
 
-                        # Merge Signatures
                         sig_row = len(sa_layout) - 3 
                         target_sheet.merge_cells(f'A{sig_row}:B{sig_row+1}') 
                         target_sheet.merge_cells(f'D{sig_row}:E{sig_row+1}')
 
-                        st.success(f"✅ Successfully formatted and published '{sheet_title}' with merged headers and borders!")
+                        st.success(f"✅ Successfully formatted and published '{sheet_title}'!")
                         st.markdown(f"[Click here to check your Google Sheet]({SHEET_URL})")
 
                     except Exception as e:
