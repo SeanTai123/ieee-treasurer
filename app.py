@@ -15,8 +15,9 @@ credentials = Credentials.from_service_account_info(
 client = gspread.authorize(credentials)
 
 # Open the Google Sheet
-SHEET_NAME = "Master_Treasury_2026" 
-sheet = client.open(SHEET_NAME).sheet1
+# Open the Google Sheet using the exact URL
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1kBFKNBkSNLJS4-qJrZ1QfhRGMkyGJCEft0T89JreTXw/edit?usp=sharing" 
+sheet = client.open_by_url(SHEET_URL).sheet1
 
 # --- 2. Build the User Interface ---
 st.set_page_config(page_title="IEEE Claim Submission", page_icon="💸")
