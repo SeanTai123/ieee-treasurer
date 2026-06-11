@@ -78,16 +78,36 @@ with tab1:
                     # 2. Upload to Google Drive if receipt exists
                     file_id = "No Receipt"
                     if receipt_file is not None:
-                        file_metadata = {
-                            'name': f"{new_id}_{payee}.{receipt_file.name.split('.')[-1]}",
-                            'parents': [DRIVE_FOLDER_ID]
-                        }
-                        # Convert Streamlit file to a standard Byte Stream for Google API
-                        file_stream = io.BytesIO(receipt_file.getvalue())
-                        media = MediaIoBaseUpload(file_stream, mimetype=receipt_file.type, resumable=True)
-                        
-                        uploaded_file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-                        file_id = uploaded_file.get('id')
+                        try:
+                            # Ensure Folder ID doesn't have extra spaces or URL parts
+                            clean_folder_id = DRIVE_FOLDER_ID.strip().split('/')[-1].split('?')[0]
+                            
+                            file_metadata = {
+                                'name': f"{new_id}_{payee}.{receipt_file.name.split('.')[-1]}",
+                                'parents': [clean_folder_id]
+                            }
+                            
+                            # Convert Streamlit file to a standard Byte Stream
+                            file_stream = io.BytesIO(receipt_file.getvalue())
+                            
+                            # FIX: Set resumable=False. Small images don't need chunking, which often breaks API uploads.
+                            media = MediaIoBaseUpload(file_stream, mimetype=receipt_file.type, resumable=False)
+                            
+                            uploaded_file = drive_service.files().create(
+                                body=file_metadata, 
+                                media_body=media, 
+                                fields='id'
+                            ).execute()
+                            
+                            file_id = uploaded_file.get('id')
+                            
+                        except Exception as e:
+                            # FIX: If it fails, bypass Streamlit's security wall and show us the RAW error
+                            st.error(f"🚨 Google Drive Upload Failed!")
+                            st.code(f"Error Message: {str(e)}")
+                            if hasattr(e, 'content'):
+                                st.code(f"Google's Exact Complaint: {e.content.decode('utf-8')}")
+                            st.stop() # Stops the script gracefully so it doesn't crash the whole app
 
                     # 3. Save to Sheet
                     is_income = "Income" in txn_type
