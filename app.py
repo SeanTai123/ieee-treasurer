@@ -12,6 +12,7 @@ from docx.shared import Mm
 # --- 1. CONFIGURATION ---
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1kBFKNBkSNLJS4-qJrZ1QfhRGMkyGJCEft0T89JreTXw/edit?usp=sharing" 
 DRIVE_FOLDER_ID = "1_SbBPQE-kYHhiate_sLUiPWJ9ypFIaBZ"
+IMGBB_API_KEY = "8d854f84a4a2b638d00b89f0deca599b"
 
 # --- 2. AUTHENTICATION ---
 scopes = [
@@ -75,39 +76,33 @@ with tab1:
                         last_balance = 0.0
                         new_id = "TRX-0001"
 
-                    # 2. Upload to Google Drive if receipt exists
+                    # 2. Upload to ImgBB if receipt exists
                     file_id = "No Receipt"
                     if receipt_file is not None:
                         try:
-                            # Ensure Folder ID doesn't have extra spaces or URL parts
-                            clean_folder_id = DRIVE_FOLDER_ID.strip().split('/')[-1].split('?')[0]
+                            # Convert image to base64 for ImgBB
+                            b64_image = base64.b64encode(receipt_file.getvalue()).decode('utf-8')
                             
-                            file_metadata = {
-                                'name': f"{new_id}_{payee}.{receipt_file.name.split('.')[-1]}",
-                                'parents': [clean_folder_id]
-                            }
+                            # Send to ImgBB
+                            res = requests.post(
+                                "https://api.imgbb.com/1/upload",
+                                data={
+                                    "key": IMGBB_API_KEY,
+                                    "image": b64_image,
+                                    "name": f"{new_id}_{payee}"
+                                }
+                            )
                             
-                            # Convert Streamlit file to a standard Byte Stream
-                            file_stream = io.BytesIO(receipt_file.getvalue())
-                            
-                            # FIX: Set resumable=False. Small images don't need chunking, which often breaks API uploads.
-                            media = MediaIoBaseUpload(file_stream, mimetype=receipt_file.type, resumable=False)
-                            
-                            uploaded_file = drive_service.files().create(
-                                body=file_metadata, 
-                                media_body=media, 
-                                fields='id'
-                            ).execute()
-                            
-                            file_id = uploaded_file.get('id')
-                            
+                            if res.status_code == 200:
+                                # Save the direct image URL into the Google Sheet!
+                                file_id = res.json()['data']['url']
+                            else:
+                                st.error(f"Image upload failed: {res.text}")
+                                st.stop()
+                                
                         except Exception as e:
-                            # FIX: If it fails, bypass Streamlit's security wall and show us the RAW error
-                            st.error(f"🚨 Google Drive Upload Failed!")
-                            st.code(f"Error Message: {str(e)}")
-                            if hasattr(e, 'content'):
-                                st.code(f"Google's Exact Complaint: {e.content.decode('utf-8')}")
-                            st.stop() # Stops the script gracefully so it doesn't crash the whole app
+                            st.error(f"🚨 Upload Failed! Error: {str(e)}")
+                            st.stop()
 
                     # 3. Save to Sheet
                     is_income = "Income" in txn_type
@@ -252,22 +247,19 @@ with tab3:
                                 'status': "Refunded to purchaser" if "Cleared" in row['Internal Status'] else "Pending PV Submission"
                             }
                             
-                            # Handle the Image downloading from Drive
-                            file_id = str(row.get('Receipt/Invoice No.', row.get('Receipt Proof', '')))
-                            if file_id and file_id != "No Receipt" and len(file_id) > 10:
+                            # Handle the Image downloading from ImgBB URL
+                            file_url = str(row.get('Receipt/Invoice No.', row.get('Receipt Proof', '')))
+                            
+                            if file_url and file_url.startswith("http"):
                                 try:
-                                    request = drive_service.files().get_media(fileId=file_id)
-                                    fh = io.BytesIO()
-                                    downloader = MediaIoBaseDownload(fh, request)
-                                    done = False
-                                    while done is False:
-                                        status, done = downloader.next_chunk()
+                                    # Download the image from the URL
+                                    img_response = requests.get(file_url)
+                                    fh = io.BytesIO(img_response.content)
                                     
-                                    fh.seek(0)
                                     # Insert the downloaded image directly into the Word template
                                     item_data['image'] = InlineImage(doc, image_descriptor=fh, width=Mm(60))
                                 except Exception as e:
-                                    item_data['image'] = f"[Image Error: {e}]"
+                                    item_data['image'] = f"[Image Download Error: {e}]"
                             else:
                                 item_data['image'] = "[No Image Attached]"
                                 
