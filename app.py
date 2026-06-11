@@ -31,8 +31,10 @@ sheet = client.open_by_url(SHEET_URL).sheet1
 st.set_page_config(page_title="IEEE Treasury App", page_icon="💸", layout="wide")
 st.title("💸 IEEE Treasury Management")
 
-# We now have 4 Tabs!
-tab1, tab2, tab3, tab4 = st.tabs(["📝 Submit Claim", "📊 Monthly Ledger", "📄 Word Tracker", "📈 Dashboard"])
+# We now have 5 Tabs!
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📝 Submit Claim", "📊 Monthly Ledger", "📄 Word Tracker", "📈 Dashboard", "⏳ Pending Claims"
+])
 
 # ==========================================
 # TAB 1: CLAIM SUBMISSION 
@@ -310,7 +312,7 @@ with tab3:
                 )
 
 # ==========================================
-# TAB 4: FINANCIAL DASHBOARD (NEW)
+# TAB 4: FINANCIAL DASHBOARD 
 # ==========================================
 with tab4:
     st.header("📈 Financial Dashboard")
@@ -320,14 +322,11 @@ with tab4:
         dash_df = pd.DataFrame(records)
         dash_df['Date'] = pd.to_datetime(dash_df['Date'], errors='coerce')
         
-        # Clean numeric columns
         dash_df['Clean_Income'] = pd.to_numeric(dash_df['Income'].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
         dash_df['Clean_Expense'] = pd.to_numeric(dash_df['Expense'].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
         
-        # Filter out "Opening Balance" from Income so charts aren't skewed
         real_income_df = dash_df[(dash_df['Clean_Income'] > 0) & (~dash_df['Description'].str.contains('Opening Balance', case=False, na=False))]
         
-        # --- 1. Top Metrics ---
         total_real_income = real_income_df['Clean_Income'].sum()
         total_expense = dash_df['Clean_Expense'].sum()
         
@@ -341,14 +340,12 @@ with tab4:
         
         st.divider()
         
-        # --- 2. Interactive Charts ---
         col_chart1, col_chart2 = st.columns(2)
         
         with col_chart1:
             st.subheader("Expenses by Category")
             expense_df = dash_df[dash_df['Clean_Expense'] > 0]
             if not expense_df.empty:
-                # Group by Category for a clean Pie Chart
                 cat_expense = expense_df.groupby('Category')['Clean_Expense'].sum().reset_index()
                 fig_pie = px.pie(cat_expense, values='Clean_Expense', names='Category', hole=0.4, 
                                  color_discrete_sequence=px.colors.sequential.RdBu)
@@ -362,13 +359,11 @@ with tab4:
             if not valid_dash_dates.empty:
                 valid_dash_dates['Month'] = valid_dash_dates['Date'].dt.strftime('%b %Y')
                 
-                # We need to group income (excluding opening balance) and expenses by month
                 monthly_exp = valid_dash_dates.groupby('Month')['Clean_Expense'].sum().reset_index()
                 monthly_inc = real_income_df.copy()
                 monthly_inc['Month'] = monthly_inc['Date'].dt.strftime('%b %Y')
                 monthly_inc = monthly_inc.groupby('Month')['Clean_Income'].sum().reset_index()
                 
-                # Merge them together for the bar chart
                 monthly_merged = pd.merge(monthly_exp, monthly_inc, on='Month', how='outer').fillna(0)
                 
                 if not monthly_merged.empty:
@@ -377,22 +372,50 @@ with tab4:
                                      labels={'value': 'Amount (RM)', 'variable': 'Cashflow Type'},
                                      color_discrete_map={'Clean_Income': '#2ECC71', 'Clean_Expense': '#E74C3C'})
                     
-                    # Rename the legend properly
                     newnames = {'Clean_Income': 'Income', 'Clean_Expense': 'Expense'}
-                    fig_bar.for_each_trace(lambda t: t.update(name = newnames[t.name],
-                                                              legendgroup = newnames[t.name],
-                                                              hovertemplate = t.hovertemplate.replace(t.name, newnames[t.name])))
+                    fig_bar.for_each_trace(lambda t: t.update(name = newnames[t.name], legendgroup = newnames[t.name], hovertemplate = t.hovertemplate.replace(t.name, newnames[t.name])))
                                                               
                     st.plotly_chart(fig_bar, use_container_width=True)
                 else:
                     st.info("Not enough data for cashflow chart.")
             else:
                 st.info("No dated transactions recorded yet.")
-                
-        st.divider()
-        st.subheader("Recent Transactions")
-        display_df = dash_df[['Date', 'Description', 'Category', 'Income', 'Expense', 'Running Balance']].tail(5).iloc[::-1]
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+# ==========================================
+# TAB 5: PENDING CLAIMS (NEW)
+# ==========================================
+with tab5:
+    st.header("⏳ Pending Reimbursements")
+    st.markdown("Overview of all committee members waiting for claim disbursements.")
+
+    if records:
+        pending_df = pd.DataFrame(records)
         
+        # Clean the expense column to do math
+        pending_df['Clean_Expense'] = pd.to_numeric(pending_df['Expense'].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
+        
+        # Filter for rows that are expenses AND contain "Pending" in their Internal Status
+        unpaid_claims = pending_df[(pending_df['Clean_Expense'] > 0) & (pending_df['Internal Status'].str.contains('Pending', case=False, na=False))]
+        
+        if not unpaid_claims.empty:
+            # 1. Show the Summary grouped by Person
+            st.subheader("Summary by Claimant")
+            summary_df = unpaid_claims.groupby('Payee/Payer')['Clean_Expense'].sum().reset_index()
+            summary_df.rename(columns={'Clean_Expense': 'Total Owed (RM)', 'Payee/Payer': 'Claimant Name'}, inplace=True)
+            
+            # Format as RM for visual cleaniness
+            summary_df['Total Owed (RM)'] = summary_df['Total Owed (RM)'].apply(lambda x: f"RM {x:,.2f}")
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            
+            st.divider()
+            
+            # 2. Show the specific detailed transactions
+            st.subheader("Detailed Pending Transactions")
+            display_cols = ['Date', 'Transaction ID', 'Payee/Payer', 'Description', 'Category', 'Expense', 'Internal Status']
+            
+            # Sort by date, newest first
+            st.dataframe(unpaid_claims[display_cols].sort_values(by='Date', ascending=False), use_container_width=True, hide_index=True)
+        else:
+            st.success("🎉 All claims have been cleared! There are no pending reimbursements.")
     else:
         st.info("No records found in the Master Ledger.")
