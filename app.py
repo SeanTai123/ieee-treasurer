@@ -252,7 +252,10 @@ with tab3:
                         
                         # Filter for Expenses in the chosen month
                         month_data = valid_dates_tab3[valid_dates_tab3['Date'].dt.strftime('%B %Y') == doc_month]
-                        expenses = month_data[month_data['Expense'] != ""]
+                        
+                        # Bulletproof filter: Only grab rows where Expense is a number greater than 0
+                        month_data['Safe_Expense'] = pd.to_numeric(month_data['Expense'], errors='coerce').fillna(0)
+                        expenses = month_data[month_data['Safe_Expense'] > 0]
                         
                         # 2. Draw the Table
                         table = doc.add_table(rows=1, cols=4)
@@ -281,9 +284,12 @@ with tab3:
                             if file_url and file_url.startswith("http"):
                                 try:
                                     img_response = requests.get(file_url)
-                                    fh = io.BytesIO(img_response.content)
-                                    # Insert image directly into the cell!
-                                    img_paragraph.add_run().add_picture(fh, width=Mm(55))
+                                    if img_response.status_code == 200:
+                                        fh = io.BytesIO(img_response.content)
+                                        # Insert image directly into the cell!
+                                        img_paragraph.add_run().add_picture(fh, width=Mm(55))
+                                    else:
+                                        img_paragraph.text = "[Image Error]"
                                 except Exception as e:
                                     img_paragraph.text = "[Image Download Error]"
                             else:
@@ -298,18 +304,24 @@ with tab3:
                             
                             counter += 1
                         
-                        # 4. Save and Download
+                        # 4. Save to Memory Buffer
                         bio = io.BytesIO()
                         doc.save(bio)
                         
-                        st.success("✅ Document generated successfully!")
-                        st.download_button(
-                            label="⬇️ Download Payment Tracker (.docx)",
-                            data=bio.getvalue(),
-                            file_name=f"Payment_Tracker_{doc_month.replace(' ', '_')}.docx",
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            type="primary"
-                        )
+                        # FIX: Save the document into the app's memory (session_state) so it survives the refresh!
+                        st.session_state['ready_doc'] = bio.getvalue()
+                        st.session_state['ready_month'] = doc_month
+                        st.success("✅ Document generated successfully! Click below to download.")
                         
                     except Exception as e:
                         st.error(f"Failed to generate document. Error: {e}")
+            
+            # FIX: Show the download button OUTSIDE the Generate button loop.
+            if 'ready_doc' in st.session_state and st.session_state.get('ready_month') == doc_month:
+                st.download_button(
+                    label="⬇️ Download Payment Tracker (.docx)",
+                    data=st.session_state['ready_doc'],
+                    file_name=f"Payment_Tracker_{doc_month.replace(' ', '_')}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    type="primary"
+                )
