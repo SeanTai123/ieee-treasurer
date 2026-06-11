@@ -37,7 +37,7 @@ tab1, tab2, tab3 = st.tabs(["📝 Submit Claim", "📊 Monthly Ledger (SA)", "�
 # TAB 1: CLAIM SUBMISSION 
 # ==========================================
 with tab1:
-    st.markdown("Submit expenses. Receipts are saved to Drive and linked automatically.")
+    st.markdown("Submit expenses. Receipts are saved to ImgBB and linked automatically.")
     with st.form("claim_form", clear_on_submit=True):
         date = st.date_input("Date of Transaction")
         payee = st.text_input("Your Name (Claimant / Payer)")
@@ -47,7 +47,7 @@ with tab1:
         txn_type = st.radio("Transaction Type", ["Expense (Claim)", "Income (Revenue)"])
         amount = st.number_input("Amount (RM)", min_value=0.0, format="%.2f")
         
-        # New: File Uploader
+        # File Uploader
         receipt_file = st.file_uploader("Upload Receipt Image (PNG/JPG)", type=['png', 'jpg', 'jpeg'])
         
         submit = st.form_submit_button("Submit Transaction")
@@ -121,7 +121,7 @@ with tab1:
                     st.success(f"✅ Successfully submitted! Tracked as {new_id}")
 
 # ==========================================
-# TAB 2: MONTHLY RECONCILIATION & EXPORT (Unchanged)
+# TAB 2: MONTHLY RECONCILIATION & EXPORT
 # ==========================================
 with tab2:
     st.header("Monthly Ledger Generator")
@@ -145,6 +145,19 @@ with tab2:
             logo_ieee_url = st.text_input("IEEE Logo URL (ending in .png/.jpg)", value="https://github.com/SeanTai123/ieee-treasurer/blob/main/ieee.png?raw=true")
             logo_sa_url = st.text_input("SA Logo URL (ending in .png/.jpg)", value="https://github.com/SeanTai123/ieee-treasurer/blob/main/SA.png?raw=true")
             
+            # --- RESTORED SIGNATURE INPUTS ---
+            col_sig1, col_sig2 = st.columns(2)
+            with col_sig1:
+                prep_name = st.text_input("Prepared by (Name)", value="Wong Yan Jie")
+                prep_email = st.text_input("Prepared by (Email)", value="efyyw6@nottingham.edu.my")
+                prep_sig_url = st.text_input("Preparer Signature URL (Optional)", value="")
+            with col_sig2:
+                ver_name = st.text_input("Verified by (Name)", value="Marcus Yew Min Jie")
+                ver_email = st.text_input("Verified by (Email)", value="ecymy2@nottingham.edu.my")
+                ver_sig_url = st.text_input("Verifier Signature URL (Optional)", value="")
+                
+            sig_date = st.date_input("Signature Date").strftime('%d/%m/%Y')
+
             if st.button(f"Generate '{selected_month}' Tab"):
                 with st.spinner("Building SA layout..."):
                     # Finding opening balance
@@ -158,8 +171,11 @@ with tab2:
                         first_bal = float(str(month_df.iloc[0]['Running Balance']).replace('RM', '').replace(',', '').strip())
                         opening_balance = first_bal - first_inc + first_exp
 
-                    ieee_formula = f'=IMAGE("{logo_ieee_url}", 1)' if logo_ieee_url else ""
-                    sa_formula = f'=IMAGE("{logo_sa_url}", 1)' if logo_sa_url else ""
+                    # --- RESTORED PLACEHOLDERS ---
+                    ieee_formula = f'=IMAGE("{logo_ieee_url}", 1)' if logo_ieee_url else "[ IEEE Logo ]"
+                    sa_formula = f'=IMAGE("{logo_sa_url}", 1)' if logo_sa_url else "[ SA Logo ]"
+                    prep_sig_formula = f'=IMAGE("{prep_sig_url}", 1)' if prep_sig_url else "[ Preparer Signature ]"
+                    ver_sig_formula = f'=IMAGE("{ver_sig_url}", 1)' if ver_sig_url else "[ Verifier Signature ]"
 
                     sa_layout = [
                         [ieee_formula, "", "", "", "", sa_formula, ""],
@@ -184,6 +200,18 @@ with tab2:
                     total_row_idx = len(sa_layout) + 1
                     sa_layout.append(["", "", "", "", "", "TOTAL: ", f"{internal_closing:.2f}"])
 
+                    # --- RESTORED SAFE SIGNATURE BLOCK ---
+                    sa_layout.extend([
+                        ["", "", "", "", "", "", ""],
+                        ["", "", "", "", "", "", ""],
+                        [prep_sig_formula, "", "", ver_sig_formula, "", "", ""], # Image Top
+                        ["", "", "", "", "", "", ""],                            # Image Middle
+                        ["", "", "", "", "", "", ""],                            # Image Bottom
+                        [f"Prepared by: {prep_name}", "", "", f"Verified by: {ver_name}", "", "", ""],
+                        [f"Email Username: {prep_email}", "", "", f"Email Username: {ver_email}", "", "", ""],
+                        [f"Date: {sig_date}", "", "", f"Date: {sig_date}", "", "", ""]
+                    ])
+
                     sheet_title = f"Ledger {selected_month}"
                     try:
                         target_sheet = client.open_by_url(SHEET_URL).worksheet(sheet_title)
@@ -193,6 +221,7 @@ with tab2:
 
                     target_sheet.update(range_name='A1', values=sa_layout, value_input_option='USER_ENTERED')
                     
+                    # Formatting
                     target_sheet.merge_cells('A1:B3')
                     target_sheet.merge_cells('F1:G3')
                     target_sheet.merge_cells('A4:G4')
@@ -204,16 +233,23 @@ with tab2:
                     target_sheet.merge_cells('F7:F8') 
                     target_sheet.format('A7:G8', {'horizontalAlignment': 'CENTER', 'verticalAlignment': 'MIDDLE', 'textFormat': {'bold': True}})
                     target_sheet.format(f'A{total_row_idx}:G{total_row_idx}', {'textFormat': {'bold': True}})
+                    
                     solid_border = {"style": "SOLID", "color": {"red": 0, "green": 0, "blue": 0}}
                     target_sheet.format(f'A7:G{total_row_idx}', {"borders": {"top": solid_border, "bottom": solid_border, "left": solid_border, "right": solid_border}})
+                    
+                    # --- RESTORED SAFE MERGE FOR SIGNATURES ---
+                    sig_start_row = len(sa_layout) - 5 
+                    target_sheet.merge_cells(f'A{sig_start_row}:B{sig_start_row+2}') 
+                    target_sheet.merge_cells(f'D{sig_start_row}:E{sig_start_row+2}')
+
                     st.success(f"✅ Generated '{sheet_title}'!")
 
 # ==========================================
-# TAB 3: WORD DOCUMENT GENERATOR (NEW)
+# TAB 3: WORD DOCUMENT GENERATOR 
 # ==========================================
 with tab3:
     st.header("📄 Payment Receipt Tracker Generator")
-    st.markdown("This will read your `receipt_template.docx`, pull the receipt images from Google Drive, and assemble the final Word document.")
+    st.markdown("This will read your `receipt_template.docx`, pull the receipt images from ImgBB, and assemble the final Word document.")
     
     if records:
         valid_dates_tab3 = df.dropna(subset=['Date'])
@@ -250,11 +286,8 @@ with tab3:
                             
                             if file_url and file_url.startswith("http"):
                                 try:
-                                    # Download the image from the URL
                                     img_response = requests.get(file_url)
                                     fh = io.BytesIO(img_response.content)
-                                    
-                                    # Insert the downloaded image directly into the Word template
                                     item_data['image'] = InlineImage(doc, image_descriptor=fh, width=Mm(60))
                                 except Exception as e:
                                     item_data['image'] = f"[Image Download Error: {e}]"
