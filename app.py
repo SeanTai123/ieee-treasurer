@@ -4,10 +4,10 @@ from google.oauth2.service_account import Credentials
 import pandas as pd
 from datetime import datetime
 import io
-from docxtpl import DocxTemplate, InlineImage
-from docx.shared import Mm
 import requests
 import base64
+from docx import Document
+from docx.shared import Mm
 
 # --- 1. CONFIGURATION ---
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1kBFKNBkSNLJS4-qJrZ1QfhRGMkyGJCEft0T89JreTXw/edit?usp=sharing" 
@@ -23,7 +23,6 @@ credentials = Credentials.from_service_account_info(
     st.secrets["gcp_service_account"],
     scopes=scopes
 )
-# Connect Sheets
 client = gspread.authorize(credentials)
 sheet = client.open_by_url(SHEET_URL).sheet1
 
@@ -47,9 +46,7 @@ with tab1:
         txn_type = st.radio("Transaction Type", ["Expense (Claim)", "Income (Revenue)"])
         amount = st.number_input("Amount (RM)", min_value=0.0, format="%.2f")
         
-        # File Uploader
         receipt_file = st.file_uploader("Upload Receipt Image (PNG/JPG)", type=['png', 'jpg', 'jpeg'])
-        
         submit = st.form_submit_button("Submit Transaction")
 
         if submit:
@@ -57,7 +54,6 @@ with tab1:
                 st.error("Please fill in all details and ensure the amount is greater than 0.")
             else:
                 with st.spinner("Processing file and updating ledger..."):
-                    # 1. Calculate next ID and Balance
                     records = sheet.get_all_records()
                     if len(records) > 0:
                         last_record = records[-1]
@@ -74,14 +70,10 @@ with tab1:
                         last_balance = 0.0
                         new_id = "TRX-0001"
 
-                    # 2. Upload to ImgBB if receipt exists
                     file_id = "No Receipt"
                     if receipt_file is not None:
                         try:
-                            # Convert image to base64 for ImgBB
                             b64_image = base64.b64encode(receipt_file.getvalue()).decode('utf-8')
-                            
-                            # Send to ImgBB
                             res = requests.post(
                                 "https://api.imgbb.com/1/upload",
                                 data={
@@ -90,19 +82,15 @@ with tab1:
                                     "name": f"{new_id}_{payee}"
                                 }
                             )
-                            
                             if res.status_code == 200:
-                                # Save the direct image URL into the Google Sheet!
                                 file_id = res.json()['data']['url']
                             else:
                                 st.error(f"Image upload failed: {res.text}")
                                 st.stop()
-                                
                         except Exception as e:
                             st.error(f"🚨 Upload Failed! Error: {str(e)}")
                             st.stop()
 
-                    # 3. Save to Sheet
                     is_income = "Income" in txn_type
                     income_val = amount if is_income else ""
                     expense_val = amount if not is_income else ""
@@ -145,7 +133,6 @@ with tab2:
             logo_ieee_url = st.text_input("IEEE Logo URL (ending in .png/.jpg)", value="https://github.com/SeanTai123/ieee-treasurer/blob/main/ieee.png?raw=true")
             logo_sa_url = st.text_input("SA Logo URL (ending in .png/.jpg)", value="https://github.com/SeanTai123/ieee-treasurer/blob/main/SA.png?raw=true")
             
-            # --- RESTORED SIGNATURE INPUTS ---
             col_sig1, col_sig2 = st.columns(2)
             with col_sig1:
                 prep_name = st.text_input("Prepared by (Name)", value="Wong Yan Jie")
@@ -160,7 +147,6 @@ with tab2:
 
             if st.button(f"Generate '{selected_month}' Tab"):
                 with st.spinner("Building SA layout..."):
-                    # Finding opening balance
                     first_txn_idx = month_df.index[0]
                     if first_txn_idx > 0:
                         prev_balance_str = str(df.iloc[first_txn_idx - 1]['Running Balance']).replace('RM', '').replace(',', '').strip()
@@ -171,7 +157,6 @@ with tab2:
                         first_bal = float(str(month_df.iloc[0]['Running Balance']).replace('RM', '').replace(',', '').strip())
                         opening_balance = first_bal - first_inc + first_exp
 
-                    # --- RESTORED PLACEHOLDERS ---
                     ieee_formula = f'=IMAGE("{logo_ieee_url}", 1)' if logo_ieee_url else "[ IEEE Logo ]"
                     sa_formula = f'=IMAGE("{logo_sa_url}", 1)' if logo_sa_url else "[ SA Logo ]"
                     prep_sig_formula = f'=IMAGE("{prep_sig_url}", 1)' if prep_sig_url else "[ Preparer Signature ]"
@@ -200,13 +185,12 @@ with tab2:
                     total_row_idx = len(sa_layout) + 1
                     sa_layout.append(["", "", "", "", "", "TOTAL: ", f"{internal_closing:.2f}"])
 
-                    # --- RESTORED SAFE SIGNATURE BLOCK ---
                     sa_layout.extend([
                         ["", "", "", "", "", "", ""],
                         ["", "", "", "", "", "", ""],
-                        [prep_sig_formula, "", "", ver_sig_formula, "", "", ""], # Image Top
-                        ["", "", "", "", "", "", ""],                            # Image Middle
-                        ["", "", "", "", "", "", ""],                            # Image Bottom
+                        [prep_sig_formula, "", "", ver_sig_formula, "", "", ""], 
+                        ["", "", "", "", "", "", ""],                            
+                        ["", "", "", "", "", "", ""],                            
                         [f"Prepared by: {prep_name}", "", "", f"Verified by: {ver_name}", "", "", ""],
                         [f"Email Username: {prep_email}", "", "", f"Email Username: {ver_email}", "", "", ""],
                         [f"Date: {sig_date}", "", "", f"Date: {sig_date}", "", "", ""]
@@ -221,7 +205,6 @@ with tab2:
 
                     target_sheet.update(range_name='A1', values=sa_layout, value_input_option='USER_ENTERED')
                     
-                    # Formatting
                     target_sheet.merge_cells('A1:B3')
                     target_sheet.merge_cells('F1:G3')
                     target_sheet.merge_cells('A4:G4')
@@ -237,7 +220,6 @@ with tab2:
                     solid_border = {"style": "SOLID", "color": {"red": 0, "green": 0, "blue": 0}}
                     target_sheet.format(f'A7:G{total_row_idx}', {"borders": {"top": solid_border, "bottom": solid_border, "left": solid_border, "right": solid_border}})
                     
-                    # --- RESTORED SAFE MERGE FOR SIGNATURES ---
                     sig_start_row = len(sa_layout) - 5 
                     target_sheet.merge_cells(f'A{sig_start_row}:B{sig_start_row+2}') 
                     target_sheet.merge_cells(f'D{sig_start_row}:E{sig_start_row+2}')
@@ -245,11 +227,11 @@ with tab2:
                     st.success(f"✅ Generated '{sheet_title}'!")
 
 # ==========================================
-# TAB 3: WORD DOCUMENT GENERATOR 
+# TAB 3: PURE PYTHON WORD DOCUMENT GENERATOR 
 # ==========================================
 with tab3:
     st.header("📄 Payment Receipt Tracker Generator")
-    st.markdown("This will read your `receipt_template.docx`, pull the receipt images from ImgBB, and assemble the final Word document.")
+    st.markdown("This will automatically draw the table, pull the receipt images from ImgBB, and assemble the final Word document.")
     
     if records:
         valid_dates_tab3 = df.dropna(subset=['Date'])
@@ -259,49 +241,64 @@ with tab3:
             doc_month = st.selectbox("Select Month for Word Doc", months_tab3, key="doc_month")
             
             if st.button("Generate Word Document"):
-                with st.spinner("Downloading images and assembling document... this may take a minute."):
+                with st.spinner("Downloading images and building document from scratch... this may take a minute."):
                     try:
-                        # Load the template you uploaded to GitHub
-                        doc = DocxTemplate("receipt_template.docx")
+                        # 1. Create a fresh Word Document
+                        doc = Document()
+                        
+                        # Add a clean Title
+                        doc.add_heading("Payment Receipt Tracker", level=1)
+                        doc.add_paragraph(f"Monthly Ledger: {doc_month}\n")
                         
                         # Filter for Expenses in the chosen month
                         month_data = valid_dates_tab3[valid_dates_tab3['Date'].dt.strftime('%B %Y') == doc_month]
                         expenses = month_data[month_data['Expense'] != ""]
                         
-                        items_list = []
+                        # 2. Draw the Table
+                        table = doc.add_table(rows=1, cols=4)
+                        table.style = 'Table Grid' # Built-in Word styling with borders
+                        
+                        # Set Table Headers
+                        hdr_cells = table.rows[0].cells
+                        hdr_cells[0].text = 'No'
+                        hdr_cells[1].text = 'Receipt'
+                        hdr_cells[2].text = 'Name and Amount'
+                        hdr_cells[3].text = 'Claim'
+                        
                         counter = 1
                         
+                        # 3. Populate Rows
                         for _, row in expenses.iterrows():
-                            # Set up the text variables
-                            item_data = {
-                                'no': counter,
-                                'desc': row['Description'],
-                                'name': row['Payee/Payer'],
-                                'amount': f"RM {row['Expense']}",
-                                'status': "Refunded to purchaser" if "Cleared" in row['Internal Status'] else "Pending PV Submission"
-                            }
+                            row_cells = table.add_row().cells
                             
-                            # Handle the Image downloading from ImgBB URL
+                            # Column 1: Number
+                            row_cells[0].text = str(counter)
+                            
+                            # Column 2: Image
                             file_url = str(row.get('Receipt/Invoice No.', row.get('Receipt Proof', '')))
+                            img_paragraph = row_cells[1].paragraphs[0]
                             
                             if file_url and file_url.startswith("http"):
                                 try:
                                     img_response = requests.get(file_url)
                                     fh = io.BytesIO(img_response.content)
-                                    item_data['image'] = InlineImage(doc, image_descriptor=fh, width=Mm(60))
+                                    # Insert image directly into the cell!
+                                    img_paragraph.add_run().add_picture(fh, width=Mm(55))
                                 except Exception as e:
-                                    item_data['image'] = f"[Image Download Error: {e}]"
+                                    img_paragraph.text = "[Image Download Error]"
                             else:
-                                item_data['image'] = "[No Image Attached]"
+                                img_paragraph.text = "[No Image Attached]"
                                 
-                            items_list.append(item_data)
+                            # Column 3: Name and Details
+                            row_cells[2].text = f"{row['Payee/Payer']}\nRM {row['Expense']}\n({row['Description']})"
+                            
+                            # Column 4: Status
+                            status = "Refunded to purchaser" if "Cleared" in str(row['Internal Status']) else "Pending PV Submission"
+                            row_cells[3].text = status
+                            
                             counter += 1
                         
-                        # Render the Word Document
-                        context = {'items': items_list}
-                        doc.render(context)
-                        
-                        # Save to a memory buffer for downloading
+                        # 4. Save and Download
                         bio = io.BytesIO()
                         doc.save(bio)
                         
@@ -315,4 +312,4 @@ with tab3:
                         )
                         
                     except Exception as e:
-                        st.error(f"Failed to generate document. Make sure 'receipt_template.docx' is in your GitHub! Error: {e}")
+                        st.error(f"Failed to generate document. Error: {e}")
