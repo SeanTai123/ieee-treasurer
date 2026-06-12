@@ -440,6 +440,40 @@ if st.session_state['admin_auth']:
                 st.subheader("Detailed Pending Transactions")
                 display_cols = ['Date', 'Transaction ID', 'Payee/Payer', 'Description', 'Category', 'Expense', 'Internal Status']
                 st.dataframe(unpaid_claims[display_cols].sort_values(by='Date', ascending=False), use_container_width=True, hide_index=True)
+                
+                # --- NEW: IN-APP CLEARING COMMAND CENTER ---
+                st.divider()
+                st.subheader("✅ Clear a Payment")
+                st.markdown("Select a transaction below after you have transferred the money to the claimant.")
+                
+                pending_ids = unpaid_claims['Transaction ID'].tolist()
+                
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    selected_txn = st.selectbox("Select Transaction ID", ["-- Select a Transaction --"] + pending_ids, label_visibility="collapsed")
+                with col2:
+                    clear_btn = st.button("Mark as Cleared", type="primary", use_container_width=True)
+                
+                if clear_btn:
+                    if selected_txn == "-- Select a Transaction --":
+                        st.warning("Please select a transaction to clear.")
+                    else:
+                        with st.spinner("Updating Google Sheet..."):
+                            all_records = sheet.get_all_records()
+                            row_to_update = None
+                            
+                            # Find the exact row in the Google Sheet
+                            for i, rec in enumerate(all_records):
+                                if rec.get('Transaction ID') == selected_txn:
+                                    row_to_update = i + 2  # +1 for header, +1 because lists are 0-indexed
+                                    break
+                            
+                            if row_to_update:
+                                # Update Column 9 (Internal Status) to "Cleared"
+                                sheet.update_cell(row_to_update, 9, "Cleared")
+                                st.success(f"🎉 {selected_txn} successfully marked as Cleared!")
+                                st.rerun()  # Instantly refreshes the page so the tables update!
+                                
             else:
                 st.success("🎉 All claims have been cleared! There are no pending reimbursements.")
         else:
