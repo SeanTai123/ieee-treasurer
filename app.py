@@ -604,6 +604,43 @@ if IS_TREASURER:
                             sheet.delete_rows(row_index)
                             st.warning(f"🗑️ Transaction {selected_id} deleted.")
                             st.rerun()
+            
+            # --- NEW: RECALCULATE BALANCES TOOL ---
+            st.divider()
+            st.subheader("🔄 Recalculate All Balances")
+            st.markdown("If you edit, delete, or reorder transactions, the running balances may become inaccurate. Click below to recalculate all balances from the beginning.")
+            
+            if st.button("Recalculate Balances", type="secondary"):
+                with st.spinner("Recalculating all balances... this takes a few seconds."):
+                    all_records = sheet.get_all_records()
+                    header = sheet.row_values(1)
+                    
+                    if "Running Balance" in header and len(all_records) > 0:
+                        rb_col_idx = header.index("Running Balance")
+                        
+                        new_balances = []
+                        current_bal = 0.0
+                        
+                        for rec in all_records:
+                            # Safely extract and clean numbers
+                            inc_str = str(rec.get('Income', '0')).replace('RM', '').replace(',', '').strip()
+                            inc = float(inc_str) if inc_str else 0.0
+                            
+                            exp_str = str(rec.get('Expense', '0')).replace('RM', '').replace(',', '').strip()
+                            exp = float(exp_str) if exp_str else 0.0
+                            
+                            # Do the math
+                            current_bal += (inc - exp)
+                            new_balances.append([f"RM {current_bal:,.2f}"])
+                        
+                        # Convert column index to the correct letter (e.g., index 10 = 'K')
+                        col_letter = chr(ord('A') + rb_col_idx)
+                        range_str = f"{col_letter}2:{col_letter}{len(all_records)+1}"
+                        
+                        # Batch update the entire column instantly
+                        sheet.update(range_name=range_str, values=new_balances, value_input_option='USER_ENTERED')
+                        
+                        st.success("✅ All running balances have been perfectly synchronized!")
         else:
             st.info("No records found.")
 
@@ -659,5 +696,23 @@ if IS_TREASURER:
                                 st.rerun()
             else:
                 st.success("🎉 No claims awaiting approval!")
+            
+            # --- NEW: REJECTED CLAIMS VIEW ---
+            st.divider()
+            st.subheader("🚫 Rejected Claims History")
+            
+            rejected_df = approval_df[approval_df['Internal Status'] == "Rejected"]
+            
+            if not rejected_df.empty:
+                st.markdown(f"You have **{len(rejected_df)}** rejected claim(s) on record.")
+                
+                # Try to pull the Notes column for the rejection reason if it exists
+                display_cols = ['Date', 'Transaction ID', 'Payee/Payer', 'Description', 'Category', 'Expense', 'Notes']
+                actual_cols = [c for c in display_cols if c in rejected_df.columns]
+                
+                st.dataframe(rejected_df[actual_cols].sort_values(by='Date', ascending=False), use_container_width=True, hide_index=True)
+            else:
+                st.info("There are no rejected claims in the ledger.")
+                
         else:
             st.info("No records found.")
