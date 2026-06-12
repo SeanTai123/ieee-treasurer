@@ -9,27 +9,68 @@ import base64
 from docx import Document
 from docx.shared import Mm
 import plotly.express as px
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 # --- 1. CONFIGURATION ---
+st.set_page_config(page_title="IEEE Treasury App", page_icon="💸", layout="wide")
+
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1kBFKNBkSNLJS4-qJrZ1QfhRGMkyGJCEft0T89JreTXw/edit?usp=sharing" 
 DRIVE_FOLDER_ID = "1_SbBPQE-kYHhiate_sLUiPWJ9ypFIaBZ"
 IMGBB_API_KEY = "8d854f84a4a2b638d00b89f0deca599b"
 
-# --- 2. AUTHENTICATION & LOGIN ---
-st.set_page_config(page_title="IEEE Treasury App", page_icon="💸", layout="wide")
+# --- 2. EMAIL HELPER FUNCTION (NOTIFY ADMIN) ---
+def notify_admin_email(payee: str, txn_id: str, amount: float, date: str, description: str, category: str):
+    """Send a notification email to the Treasurer when a new claim is submitted."""
+    try:
+        sender_email = st.secrets["email"]["sender"]
+        admin_email = st.secrets["email"]["admin_email"]
+        app_password = st.secrets["email"]["password"]
+        
+        msg = MIMEMultipart("alternative")
+        msg['Subject'] = f"🚨 New Claim Submitted: {txn_id} by {payee}"
+        msg['From']    = sender_email
+        msg['To']      = admin_email
 
-# Initialize login state
+        body = f"""
+        <html><body>
+        <h3>New Claim Requires Approval</h3>
+        <p>A new expense claim has been submitted on the Treasury App.</p>
+        <table border="1" cellpadding="6" cellspacing="0">
+            <tr><td><b>Claimant</b></td><td>{payee}</td></tr>
+            <tr><td><b>Amount</b></td><td><b>RM {amount:.2f}</b></td></tr>
+            <tr><td><b>Category</b></td><td>{category}</td></tr>
+            <tr><td><b>Description</b></td><td>{description}</td></tr>
+            <tr><td><b>Date</b></td><td>{date}</td></tr>
+            <tr><td><b>Transaction ID</b></td><td>{txn_id}</td></tr>
+        </table>
+        <p>Please log in to the App's Admin Portal (Tab 7: Approvals) to review it.</p>
+        </body></html>
+        """
+        msg.attach(MIMEText(body, "html"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(sender_email, app_password)
+            server.sendmail(sender_email, admin_email, msg.as_string())
+
+        return True
+    except Exception as e:
+        st.warning(f"⚠️ App updated, but email notification failed: {e}")
+        return False
+
+# ==========================================
+# 3. AUTH GATE (SIDEBAR)
+# ==========================================
 if 'admin_auth' not in st.session_state:
     st.session_state['admin_auth'] = False
 
-# Sidebar Login Portal
 with st.sidebar:
     st.header("🔒 Admin Portal")
     if not st.session_state['admin_auth']:
-        st.markdown("Login to access Treasury Ledgers and Documents.")
+        st.markdown("Login to access Treasury Ledgers and Management Tools.")
         pwd = st.text_input("Enter Admin Password", type="password")
         if st.button("Login"):
-            # Gets password from Streamlit Secrets (defaults to "ieee2026" if you forgot to set it)
             correct_pwd = st.secrets.get("admin_password", "ieee2026") 
             if pwd == correct_pwd:
                 st.session_state['admin_auth'] = True
@@ -42,7 +83,9 @@ with st.sidebar:
             st.session_state['admin_auth'] = False
             st.rerun()
 
-# Google Sheets Connect
+IS_TREASURER = st.session_state['admin_auth']
+
+# --- 4. CONNECT TO SHEETS ---
 scopes = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
@@ -54,13 +97,15 @@ credentials = Credentials.from_service_account_info(
 client = gspread.authorize(credentials)
 sheet = client.open_by_url(SHEET_URL).sheet1
 
-# --- 3. UI SETUP ---
 st.title("💸 IEEE Treasury Management")
 
-# Dynamic Tabs: Show 5 tabs if logged in, otherwise just show 1 tab.
-if st.session_state['admin_auth']:
-    tabs = st.tabs(["📝 Submit Claim", "📊 Monthly Ledger", "📄 Word Tracker", "📈 Dashboard", "⏳ Pending Claims"])
-    tab1, tab2, tab3, tab4, tab5 = tabs
+# Setup Tabs based on role
+if IS_TREASURER:
+    tabs = st.tabs([
+        "📝 Submit Claim", "📊 Monthly Ledger", "📄 Word Tracker",
+        "📈 Dashboard", "⏳ Pending Claims", "🛠️ Manage", "🔍 Approvals"
+    ])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = tabs
 else:
     tabs = st.tabs(["📝 Submit Claim"])
     tab1 = tabs[0]
@@ -69,7 +114,7 @@ else:
 # TAB 1: CLAIM SUBMISSION (PUBLIC)
 # ==========================================
 with tab1:
-    st.markdown("Submit expenses. Receipts are saved securely and linked automatically.")
+    st.markdown("Submit expenses. Receipts are saved to ImgBB and linked automatically.")
     with st.form("claim_form", clear_on_submit=True):
         date = st.date_input("Date of Transaction")
         payee = st.text_input("Your Name (Claimant / Payer)")
@@ -113,11 +158,7 @@ with tab1:
                             b64_image = base64.b64encode(receipt_file.getvalue()).decode('utf-8')
                             res = requests.post(
                                 "https://api.imgbb.com/1/upload",
-                                data={
-                                    "key": IMGBB_API_KEY,
-                                    "image": b64_image,
-                                    "name": f"{new_id}_{payee}"
-                                }
+                                data={"key": IMGBB_API_KEY, "image": b64_image, "name": f"{new_id}_{payee}"}
                             )
                             if res.status_code == 200:
                                 file_id = res.json()['data']['url']
@@ -140,19 +181,29 @@ with tab1:
                         f"{income_val:.2f}" if income_val else "",
                         f"{expense_val:.2f}" if expense_val else "",
                         file_id, payee,
-                        "Cleared" if is_income else "Pending PV Submission",
+                        "Cleared" if is_income else "Awaiting Approval",
                         "", f"RM {new_balance:,.2f}"
                     ]
                     
                     sheet.append_row(row_data)
-                    st.success(f"✅ Successfully submitted! Tracked as {new_id}")
+                    
+                    # Send Email Notification to Admin if it's an expense claim
+                    if not is_income:
+                        notify_admin_email(
+                            payee=payee,
+                            txn_id=new_id,
+                            amount=amount,
+                            date=str(date),
+                            description=description,
+                            category=final_category
+                        )
 
+                    st.success(f"✅ Successfully submitted! Tracked as {new_id}")
 
 # ==========================================
 # ADMIN TABS (ONLY RUN IF LOGGED IN)
 # ==========================================
-if st.session_state['admin_auth']:
-    
+if IS_TREASURER:
     # --- TAB 2: MONTHLY RECONCILIATION ---
     with tab2:
         st.header("Monthly Ledger Generator")
@@ -440,41 +491,153 @@ if st.session_state['admin_auth']:
                 st.subheader("Detailed Pending Transactions")
                 display_cols = ['Date', 'Transaction ID', 'Payee/Payer', 'Description', 'Category', 'Expense', 'Internal Status']
                 st.dataframe(unpaid_claims[display_cols].sort_values(by='Date', ascending=False), use_container_width=True, hide_index=True)
-                
-                # --- NEW: IN-APP CLEARING COMMAND CENTER ---
+
                 st.divider()
-                st.subheader("✅ Clear a Payment")
-                st.markdown("Select a transaction below after you have transferred the money to the claimant.")
-                
-                pending_ids = unpaid_claims['Transaction ID'].tolist()
-                
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    selected_txn = st.selectbox("Select Transaction ID", ["-- Select a Transaction --"] + pending_ids, label_visibility="collapsed")
-                with col2:
-                    clear_btn = st.button("Mark as Cleared", type="primary", use_container_width=True)
-                
-                if clear_btn:
-                    if selected_txn == "-- Select a Transaction --":
-                        st.warning("Please select a transaction to clear.")
-                    else:
-                        with st.spinner("Updating Google Sheet..."):
+                st.subheader("✅ Mark Claims as Cleared")
+
+                txn_ids = unpaid_claims['Transaction ID'].tolist()
+                selected_txns = st.multiselect("Select Transaction ID(s) to mark as Cleared", txn_ids)
+
+                col_btn1, col_btn2 = st.columns([1, 4])
+                with col_btn1:
+                    if st.button("✅ Mark as Cleared", type="primary", disabled=len(selected_txns) == 0):
+                        with st.spinner("Updating records..."):
                             all_records = sheet.get_all_records()
-                            row_to_update = None
-                            
-                            # Find the exact row in the Google Sheet
-                            for i, rec in enumerate(all_records):
-                                if rec.get('Transaction ID') == selected_txn:
-                                    row_to_update = i + 2  # +1 for header, +1 because lists are 0-indexed
-                                    break
-                            
-                            if row_to_update:
-                                # Update Column 9 (Internal Status) to "Cleared"
-                                sheet.update_cell(row_to_update, 9, "Cleared")
-                                st.success(f"🎉 {selected_txn} successfully marked as Cleared!")
-                                st.rerun()  # Instantly refreshes the page so the tables update!
-                                
+                            header = sheet.row_values(1)
+                            status_col = header.index("Internal Status") + 1  
+
+                            updated = 0
+                            for i, record in enumerate(all_records):
+                                if record.get("Transaction ID") in selected_txns:
+                                    row_number = i + 2  
+                                    sheet.update_cell(row_number, status_col, "Cleared")
+                                    updated += 1
+
+                            st.success(f"✅ Marked {updated} transaction(s) as Cleared!")
+                            st.rerun()
             else:
                 st.success("🎉 All claims have been cleared! There are no pending reimbursements.")
         else:
             st.info("No records found in the Master Ledger.")
+
+    # --- TAB 6: MANAGE TRANSACTIONS ---
+    with tab6:
+        st.header("🛠️ Edit / Delete Transactions")
+        st.warning("⚠️ Changes here directly modify the Master Ledger. Use with care.")
+
+        if records:
+            manage_df = pd.DataFrame(records)
+
+            search_query = st.text_input("Search by Transaction ID or Payee Name")
+            if search_query:
+                filtered = manage_df[
+                    manage_df['Transaction ID'].str.contains(search_query, case=False, na=False) |
+                    manage_df['Payee/Payer'].str.contains(search_query, case=False, na=False)
+                ]
+            else:
+                filtered = manage_df.tail(20)  
+
+            st.dataframe(filtered[['Transaction ID', 'Date', 'Payee/Payer', 'Description', 'Income', 'Expense', 'Internal Status']], 
+                         use_container_width=True, hide_index=True)
+
+            st.divider()
+
+            selected_id = st.selectbox("Select Transaction ID to Edit or Delete", filtered['Transaction ID'].tolist())
+
+            if selected_id:
+                row_data = manage_df[manage_df['Transaction ID'] == selected_id].iloc[0]
+                row_index = manage_df[manage_df['Transaction ID'] == selected_id].index[0] + 2  
+
+                with st.expander(f"✏️ Edit Transaction: {selected_id}", expanded=True):
+                    new_date        = st.date_input("Date", value=pd.to_datetime(row_data['Date']))
+                    new_desc        = st.text_input("Description", value=row_data['Description'])
+                    new_category    = st.text_input("Category", value=row_data['Category'])
+                    new_payee       = st.text_input("Payee/Payer", value=row_data['Payee/Payer'])
+                    
+                    status_options = ["Awaiting Approval", "Pending PV Submission", "Cleared", "Rejected"]
+                    current_status = row_data.get('Internal Status', 'Awaiting Approval')
+                    status_idx = status_options.index(current_status) if current_status in status_options else 0
+                    
+                    new_status = st.selectbox("Internal Status", status_options, index=status_idx)
+
+                    col_save, col_delete = st.columns([1, 1])
+
+                    with col_save:
+                        if st.button("💾 Save Changes", type="primary"):
+                            header = sheet.row_values(1)
+                            updates = {
+                                'Date': str(new_date),
+                                'Description': new_desc,
+                                'Category': new_category,
+                                'Payee/Payer': new_payee,
+                                'Internal Status': new_status,
+                            }
+                            for col_name, new_value in updates.items():
+                                if col_name in header:
+                                    col_idx = header.index(col_name) + 1
+                                    sheet.update_cell(row_index, col_idx, new_value)
+                            st.success(f"✅ Transaction {selected_id} updated!")
+                            st.rerun()
+
+                    with col_delete:
+                        if st.button("🗑️ Delete Transaction", type="secondary"):
+                            sheet.delete_rows(row_index)
+                            st.warning(f"🗑️ Transaction {selected_id} deleted.")
+                            st.rerun()
+        else:
+            st.info("No records found.")
+
+    # --- TAB 7: APPROVAL WORKFLOW ---
+    with tab7:
+        st.header("🔍 Claim Approvals")
+        st.markdown("Review and approve or reject newly submitted expense claims.")
+
+        if records:
+            approval_df = pd.DataFrame(records)
+            approval_df['Clean_Expense'] = pd.to_numeric(
+                approval_df['Expense'].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce'
+            ).fillna(0)
+
+            awaiting = approval_df[approval_df['Internal Status'] == "Awaiting Approval"]
+
+            if not awaiting.empty:
+                st.info(f"📋 {len(awaiting)} claim(s) awaiting your review.")
+
+                for _, row in awaiting.iterrows():
+                    with st.expander(f"🔔 {row['Transaction ID']} — {row['Payee/Payer']} — RM {row['Clean_Expense']:.2f}"):
+                        st.write(f"**Date:** {row['Date']}")
+                        st.write(f"**Description:** {row['Description']}")
+                        st.write(f"**Category:** {row['Category']}")
+                        st.write(f"**Amount:** RM {row['Clean_Expense']:.2f}")
+
+                        receipt_url = str(row.get('Receipt/Invoice No.', ''))
+                        if receipt_url.startswith("http"):
+                            st.markdown(f"🧾 [View Receipt]({receipt_url})")
+                        else:
+                            st.write("🧾 No receipt uploaded.")
+
+                        col_approve, col_reject = st.columns(2)
+
+                        row_idx = approval_df[approval_df['Transaction ID'] == row['Transaction ID']].index[0] + 2
+                        header  = sheet.row_values(1)
+                        status_col = header.index("Internal Status") + 1
+
+                        with col_approve:
+                            if st.button(f"✅ Approve {row['Transaction ID']}", key=f"approve_{row['Transaction ID']}"):
+                                sheet.update_cell(row_idx, status_col, "Pending PV Submission")
+                                st.success(f"Approved {row['Transaction ID']}!")
+                                st.rerun()
+
+                        with col_reject:
+                            reject_reason = st.text_input("Reason (optional)", key=f"reason_{row['Transaction ID']}")
+                            if st.button(f"❌ Reject {row['Transaction ID']}", key=f"reject_{row['Transaction ID']}"):
+                                notes_col = header.index("Notes") + 1 if "Notes" in header else None
+                                sheet.update_cell(row_idx, status_col, "Rejected")
+                                if notes_col and reject_reason:
+                                    sheet.update_cell(row_idx, notes_col, f"Rejected: {reject_reason}")
+                                st.warning(f"Rejected {row['Transaction ID']}.")
+                                st.rerun()
+            else:
+                st.success("🎉 No claims awaiting approval!")
+        else:
+            st.info("No records found.")
