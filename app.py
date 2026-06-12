@@ -204,7 +204,9 @@ with tab1:
 # ADMIN TABS (ONLY RUN IF LOGGED IN)
 # ==========================================
 if IS_TREASURER:
-    # --- TAB 2: MONTHLY RECONCILIATION ---
+    # ==========================================
+    # TAB 2: MONTHLY RECONCILIATION
+    # ==========================================
     with tab2:
         st.header("Monthly Ledger Generator")
         records = sheet.get_all_records()
@@ -218,10 +220,13 @@ if IS_TREASURER:
                 selected_month = st.selectbox("Select Month to Process", months_available)
                 month_df = valid_dates[valid_dates['Date'].dt.strftime('%B %Y') == selected_month].copy()
                 
+                # FIX: Remove unapproved/rejected claims from the official SA Ledger!
+                month_df = month_df[~month_df['Internal Status'].isin(['Awaiting Approval', 'Rejected'])]
+                
                 month_df['Clean_Income'] = pd.to_numeric(month_df['Income'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
                 month_df['Clean_Expense'] = pd.to_numeric(month_df['Expense'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
                 
-                internal_closing_str = str(month_df.iloc[-1]['Running Balance']).replace('RM', '').replace(',', '').strip()
+                internal_closing_str = str(month_df.iloc[-1]['Running Balance']).replace('RM', '').replace(',', '').strip() if not month_df.empty else "0.00"
                 internal_closing = float(internal_closing_str)
                 
                 logo_ieee_url = st.text_input("IEEE Logo URL (ending in .png/.jpg)", value="https://github.com/SeanTai123/ieee-treasurer/blob/main/ieee.png?raw=true")
@@ -240,85 +245,88 @@ if IS_TREASURER:
                 sig_date = st.date_input("Signature Date").strftime('%d/%m/%Y')
 
                 if st.button(f"Generate '{selected_month}' Tab"):
-                    with st.spinner("Building SA layout..."):
-                        first_txn_idx = month_df.index[0]
-                        if first_txn_idx > 0:
-                            prev_balance_str = str(df.iloc[first_txn_idx - 1]['Running Balance']).replace('RM', '').replace(',', '').strip()
-                            opening_balance = float(prev_balance_str)
-                        else:
-                            first_inc = month_df.iloc[0]['Clean_Income']
-                            first_exp = month_df.iloc[0]['Clean_Expense']
-                            first_bal = float(str(month_df.iloc[0]['Running Balance']).replace('RM', '').replace(',', '').strip())
-                            opening_balance = first_bal - first_inc + first_exp
+                    if month_df.empty:
+                        st.warning("No approved transactions found for this month.")
+                    else:
+                        with st.spinner("Building SA layout..."):
+                            first_txn_idx = month_df.index[0]
+                            if first_txn_idx > 0:
+                                prev_balance_str = str(df.iloc[first_txn_idx - 1]['Running Balance']).replace('RM', '').replace(',', '').strip()
+                                opening_balance = float(prev_balance_str)
+                            else:
+                                first_inc = month_df.iloc[0]['Clean_Income']
+                                first_exp = month_df.iloc[0]['Clean_Expense']
+                                first_bal = float(str(month_df.iloc[0]['Running Balance']).replace('RM', '').replace(',', '').strip())
+                                opening_balance = first_bal - first_inc + first_exp
 
-                        ieee_formula = f'=IMAGE("{logo_ieee_url}", 1)' if logo_ieee_url else "[ IEEE Logo ]"
-                        sa_formula = f'=IMAGE("{logo_sa_url}", 1)' if logo_sa_url else "[ SA Logo ]"
-                        prep_sig_formula = f'=IMAGE("{prep_sig_url}", 1)' if prep_sig_url else "[ Preparer Signature ]"
-                        ver_sig_formula = f'=IMAGE("{ver_sig_url}", 1)' if ver_sig_url else "[ Verifier Signature ]"
+                            ieee_formula = f'=IMAGE("{logo_ieee_url}", 1)' if logo_ieee_url else "[ IEEE Logo ]"
+                            sa_formula = f'=IMAGE("{logo_sa_url}", 1)' if logo_sa_url else "[ SA Logo ]"
+                            prep_sig_formula = f'=IMAGE("{prep_sig_url}", 1)' if prep_sig_url else "[ Preparer Signature ]"
+                            ver_sig_formula = f'=IMAGE("{ver_sig_url}", 1)' if ver_sig_url else "[ Verifier Signature ]"
 
-                        sa_layout = [
-                            [ieee_formula, "", "", "", "", sa_formula, ""],
-                            ["", "", "", "", "", "", ""],
-                            ["", "", "", "", "", "", ""],
-                            ["IEEE UNM Student Branch", "", "", "", "", "", ""],
-                            [f"Monthly Ledger for {selected_month}", "", "", "", "", "", ""],
-                            ["", "", "", "", "", "", ""],
-                            ["Date", "Details", "Income", "Expenses", "OR No", "CS-PV No", "Balance"],
-                            ["", "", "RM", "RM", "", "", "RM"],
-                            [month_df.iloc[0]['Date'].strftime('%Y-%m-%d'), "Opening Balance", "", "", "", "", f"{opening_balance:.2f}"]
-                        ]
+                            sa_layout = [
+                                [ieee_formula, "", "", "", "", sa_formula, ""],
+                                ["", "", "", "", "", "", ""],
+                                ["", "", "", "", "", "", ""],
+                                ["IEEE UNM Student Branch", "", "", "", "", "", ""],
+                                [f"Monthly Ledger for {selected_month}", "", "", "", "", "", ""],
+                                ["", "", "", "", "", "", ""],
+                                ["Date", "Details", "Income", "Expenses", "OR No", "CS-PV No", "Balance"],
+                                ["", "", "RM", "RM", "", "", "RM"],
+                                [month_df.iloc[0]['Date'].strftime('%Y-%m-%d'), "Opening Balance", "", "", "", "", f"{opening_balance:.2f}"]
+                            ]
 
-                        for _, row in month_df.iterrows():
-                            if "opening balance" in str(row['Description']).lower():
-                                continue
-                            inc = f"{row['Clean_Income']:.2f}" if row['Clean_Income'] > 0 else ""
-                            exp = f"{row['Clean_Expense']:.2f}" if row['Clean_Expense'] > 0 else ""
-                            bal = f"{float(str(row['Running Balance']).replace('RM', '').replace(',', '').strip()):.2f}"
-                            sa_layout.append([row['Date'].strftime('%Y-%m-%d'), row['Description'], inc, exp, "", row['Notes'], bal])
+                            for _, row in month_df.iterrows():
+                                if "opening balance" in str(row['Description']).lower():
+                                    continue
+                                inc = f"{row['Clean_Income']:.2f}" if row['Clean_Income'] > 0 else ""
+                                exp = f"{row['Clean_Expense']:.2f}" if row['Clean_Expense'] > 0 else ""
+                                bal = f"{float(str(row['Running Balance']).replace('RM', '').replace(',', '').strip()):.2f}"
+                                sa_layout.append([row['Date'].strftime('%Y-%m-%d'), row['Description'], inc, exp, "", row['Notes'], bal])
 
-                        total_row_idx = len(sa_layout) + 1
-                        sa_layout.append(["", "", "", "", "", "TOTAL: ", f"{internal_closing:.2f}"])
+                            total_row_idx = len(sa_layout) + 1
+                            sa_layout.append(["", "", "", "", "", "TOTAL: ", f"{internal_closing:.2f}"])
 
-                        sa_layout.extend([
-                            ["", "", "", "", "", "", ""],
-                            ["", "", "", "", "", "", ""],
-                            [prep_sig_formula, "", "", ver_sig_formula, "", "", ""], 
-                            ["", "", "", "", "", "", ""],                            
-                            ["", "", "", "", "", "", ""],                            
-                            [f"Prepared by: {prep_name}", "", "", f"Verified by: {ver_name}", "", "", ""],
-                            [f"Email Username: {prep_email}", "", "", f"Email Username: {ver_email}", "", "", ""],
-                            [f"Date: {sig_date}", "", "", f"Date: {sig_date}", "", "", ""]
-                        ])
+                            sa_layout.extend([
+                                ["", "", "", "", "", "", ""],
+                                ["", "", "", "", "", "", ""],
+                                [prep_sig_formula, "", "", ver_sig_formula, "", "", ""], 
+                                ["", "", "", "", "", "", ""],                            
+                                ["", "", "", "", "", "", ""],                            
+                                [f"Prepared by: {prep_name}", "", "", f"Verified by: {ver_name}", "", "", ""],
+                                [f"Email Username: {prep_email}", "", "", f"Email Username: {ver_email}", "", "", ""],
+                                [f"Date: {sig_date}", "", "", f"Date: {sig_date}", "", "", ""]
+                            ])
 
-                        sheet_title = f"Ledger {selected_month}"
-                        try:
-                            target_sheet = client.open_by_url(SHEET_URL).worksheet(sheet_title)
-                            target_sheet.clear()
-                        except:
-                            target_sheet = client.open_by_url(SHEET_URL).add_worksheet(title=sheet_title, rows=len(sa_layout)+5, cols=8)
+                            sheet_title = f"Ledger {selected_month}"
+                            try:
+                                target_sheet = client.open_by_url(SHEET_URL).worksheet(sheet_title)
+                                target_sheet.clear()
+                            except:
+                                target_sheet = client.open_by_url(SHEET_URL).add_worksheet(title=sheet_title, rows=len(sa_layout)+5, cols=8)
 
-                        target_sheet.update(range_name='A1', values=sa_layout, value_input_option='USER_ENTERED')
-                        
-                        target_sheet.merge_cells('A1:B3')
-                        target_sheet.merge_cells('F1:G3')
-                        target_sheet.merge_cells('A4:G4')
-                        target_sheet.merge_cells('A5:G5')
-                        target_sheet.format('A4:A5', {'horizontalAlignment': 'CENTER', 'textFormat': {'bold': True, 'fontSize': 12}})
-                        target_sheet.merge_cells('A7:A8') 
-                        target_sheet.merge_cells('B7:B8') 
-                        target_sheet.merge_cells('E7:E8') 
-                        target_sheet.merge_cells('F7:F8') 
-                        target_sheet.format('A7:G8', {'horizontalAlignment': 'CENTER', 'verticalAlignment': 'MIDDLE', 'textFormat': {'bold': True}})
-                        target_sheet.format(f'A{total_row_idx}:G{total_row_idx}', {'textFormat': {'bold': True}})
-                        
-                        solid_border = {"style": "SOLID", "color": {"red": 0, "green": 0, "blue": 0}}
-                        target_sheet.format(f'A7:G{total_row_idx}', {"borders": {"top": solid_border, "bottom": solid_border, "left": solid_border, "right": solid_border}})
-                        
-                        sig_start_row = len(sa_layout) - 5 
-                        target_sheet.merge_cells(f'A{sig_start_row}:B{sig_start_row+2}') 
-                        target_sheet.merge_cells(f'D{sig_start_row}:E{sig_start_row+2}')
+                            target_sheet.update(range_name='A1', values=sa_layout, value_input_option='USER_ENTERED')
+                            
+                            target_sheet.merge_cells('A1:B3')
+                            target_sheet.merge_cells('F1:G3')
+                            target_sheet.merge_cells('A4:G4')
+                            target_sheet.merge_cells('A5:G5')
+                            target_sheet.format('A4:A5', {'horizontalAlignment': 'CENTER', 'textFormat': {'bold': True, 'fontSize': 12}})
+                            target_sheet.merge_cells('A7:A8') 
+                            target_sheet.merge_cells('B7:B8') 
+                            target_sheet.merge_cells('E7:E8') 
+                            target_sheet.merge_cells('F7:F8') 
+                            target_sheet.format('A7:G8', {'horizontalAlignment': 'CENTER', 'verticalAlignment': 'MIDDLE', 'textFormat': {'bold': True}})
+                            target_sheet.format(f'A{total_row_idx}:G{total_row_idx}', {'textFormat': {'bold': True}})
+                            
+                            solid_border = {"style": "SOLID", "color": {"red": 0, "green": 0, "blue": 0}}
+                            target_sheet.format(f'A7:G{total_row_idx}', {"borders": {"top": solid_border, "bottom": solid_border, "left": solid_border, "right": solid_border}})
+                            
+                            sig_start_row = len(sa_layout) - 5 
+                            target_sheet.merge_cells(f'A{sig_start_row}:B{sig_start_row+2}') 
+                            target_sheet.merge_cells(f'D{sig_start_row}:E{sig_start_row+2}')
 
-                        st.success(f"✅ Generated '{sheet_title}'!")
+                            st.success(f"✅ Generated '{sheet_title}'!")
 
     # --- TAB 3: WORD DOCUMENT GENERATOR ---
     with tab3:
@@ -340,52 +348,59 @@ if IS_TREASURER:
                             doc.add_paragraph(f"Monthly Ledger: {doc_month}\n")
                             
                             month_data = valid_dates_tab3[valid_dates_tab3['Date'].dt.strftime('%B %Y') == doc_month].copy()
+                            
+                            # FIX: Remove unapproved/rejected claims from the Word Tracker!
+                            month_data = month_data[~month_data['Internal Status'].isin(['Awaiting Approval', 'Rejected'])]
+                            
                             month_data['Clean_Expense'] = pd.to_numeric(month_data['Expense'].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
                             expenses = month_data[month_data['Clean_Expense'] > 0]
                             
-                            table = doc.add_table(rows=1, cols=4)
-                            table.style = 'Table Grid'
-                            
-                            hdr_cells = table.rows[0].cells
-                            hdr_cells[0].text = 'No'
-                            hdr_cells[1].text = 'Receipt'
-                            hdr_cells[2].text = 'Name and Amount'
-                            hdr_cells[3].text = 'Claim'
-                            
-                            counter = 1
-                            for _, row in expenses.iterrows():
-                                row_cells = table.add_row().cells
-                                row_cells[0].text = str(counter)
+                            if expenses.empty:
+                                st.warning("No approved expenses found for this month.")
+                            else:
+                                table = doc.add_table(rows=1, cols=4)
+                                table.style = 'Table Grid'
                                 
-                                file_url = str(row.get('Receipt/Invoice No.', row.get('Receipt Proof', '')))
-                                img_paragraph = row_cells[1].paragraphs[0]
+                                hdr_cells = table.rows[0].cells
+                                hdr_cells[0].text = 'No'
+                                hdr_cells[1].text = 'Receipt'
+                                hdr_cells[2].text = 'Name and Amount'
+                                hdr_cells[3].text = 'Claim'
                                 
-                                if file_url and file_url.startswith("http"):
-                                    try:
-                                        img_response = requests.get(file_url)
-                                        if img_response.status_code == 200:
-                                            fh = io.BytesIO(img_response.content)
-                                            img_paragraph.add_run().add_picture(fh, width=Mm(55))
-                                        else:
-                                            img_paragraph.text = "[Image Error]"
-                                    except Exception as e:
-                                        img_paragraph.text = "[Image Download Error]"
-                                else:
-                                    img_paragraph.text = "[No Image Attached]"
+                                counter = 1
+                                for _, row in expenses.iterrows():
+                                    row_cells = table.add_row().cells
+                                    row_cells[0].text = str(counter)
                                     
-                                row_cells[2].text = f"{row['Payee/Payer']}\nRM {row['Clean_Expense']:.2f}\n({row['Description']})"
-                                status = "Refunded to purchaser" if "Cleared" in str(row['Internal Status']) else "Pending PV Submission"
-                                row_cells[3].text = status
-                                counter += 1
-                            
-                            temp_file_name = f"temp_{doc_month.replace(' ', '_')}.docx"
-                            doc.save(temp_file_name)
-                            
-                            with open(temp_file_name, "rb") as f:
-                                st.session_state['ready_doc'] = f.read()
+                                    file_url = str(row.get('Receipt/Invoice No.', row.get('Receipt Proof', '')))
+                                    img_paragraph = row_cells[1].paragraphs[0]
+                                    
+                                    if file_url and file_url.startswith("http"):
+                                        try:
+                                            img_response = requests.get(file_url)
+                                            if img_response.status_code == 200:
+                                                fh = io.BytesIO(img_response.content)
+                                                img_paragraph.add_run().add_picture(fh, width=Mm(55))
+                                            else:
+                                                img_paragraph.text = "[Image Error]"
+                                        except Exception as e:
+                                            img_paragraph.text = "[Image Download Error]"
+                                    else:
+                                        img_paragraph.text = "[No Image Attached]"
+                                        
+                                    row_cells[2].text = f"{row['Payee/Payer']}\nRM {row['Clean_Expense']:.2f}\n({row['Description']})"
+                                    status = "Refunded to purchaser" if "Cleared" in str(row['Internal Status']) else "Pending PV Submission"
+                                    row_cells[3].text = status
+                                    counter += 1
                                 
-                            st.session_state['ready_month'] = doc_month
-                            st.success("✅ Document generated successfully! Click below to download.")
+                                temp_file_name = f"temp_{doc_month.replace(' ', '_')}.docx"
+                                doc.save(temp_file_name)
+                                
+                                with open(temp_file_name, "rb") as f:
+                                    st.session_state['ready_doc'] = f.read()
+                                    
+                                st.session_state['ready_month'] = doc_month
+                                st.success("✅ Document generated successfully! Click below to download.")
                             
                         except Exception as e:
                             st.error(f"Failed to generate document. Error: {e}")
@@ -408,6 +423,9 @@ if IS_TREASURER:
             dash_df = pd.DataFrame(records)
             dash_df['Date'] = pd.to_datetime(dash_df['Date'], errors='coerce')
             
+            # FIX: Remove unapproved and rejected claims from the dashboard charts!
+            dash_df = dash_df[~dash_df['Internal Status'].isin(['Awaiting Approval', 'Rejected'])]
+            
             dash_df['Clean_Income'] = pd.to_numeric(dash_df['Income'].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
             dash_df['Clean_Expense'] = pd.to_numeric(dash_df['Expense'].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
             
@@ -416,20 +434,22 @@ if IS_TREASURER:
             total_real_income = real_income_df['Clean_Income'].sum()
             total_expense = dash_df['Clean_Expense'].sum()
             
-            current_balance_str = str(dash_df.iloc[-1]['Running Balance']).replace('RM', '').replace(',', '').strip()
+            # We use the raw records for current balance to ensure math aligns with the sheet
+            raw_df = pd.DataFrame(records)
+            current_balance_str = str(raw_df.iloc[-1]['Running Balance']).replace('RM', '').replace(',', '').strip() if not raw_df.empty else "0.00"
             current_balance = float(current_balance_str) if current_balance_str else 0.0
             
             col_m1, col_m2, col_m3 = st.columns(3)
             col_m1.metric("💰 Current Balance", f"RM {current_balance:,.2f}")
             col_m2.metric("🟢 Total Revenue Generated", f"RM {total_real_income:,.2f}")
-            col_m3.metric("🔴 Total Expenses", f"RM {total_expense:,.2f}")
+            col_m3.metric("🔴 Total Approved Expenses", f"RM {total_expense:,.2f}")
             
             st.divider()
             
             col_chart1, col_chart2 = st.columns(2)
             
             with col_chart1:
-                st.subheader("Expenses by Category")
+                st.subheader("Approved Expenses by Category")
                 expense_df = dash_df[dash_df['Clean_Expense'] > 0]
                 if not expense_df.empty:
                     cat_expense = expense_df.groupby('Category')['Clean_Expense'].sum().reset_index()
@@ -437,7 +457,7 @@ if IS_TREASURER:
                                      color_discrete_sequence=px.colors.sequential.RdBu)
                     st.plotly_chart(fig_pie, use_container_width=True)
                 else:
-                    st.info("No expenses recorded yet.")
+                    st.info("No approved expenses recorded yet.")
                     
             with col_chart2:
                 st.subheader("Monthly Cashflow")
