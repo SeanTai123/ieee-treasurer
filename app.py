@@ -47,6 +47,10 @@ with tab1:
         description = st.text_input("Description (e.g., Paper plates for Welcoming Night)")
         
         category = st.selectbox("Category", ["Event Expense", "Merch Sales", "Operations", "Sponsorship", "Other"])
+        
+        # FIX: Add the new text input for 'Other' categories
+        other_category = st.text_input("If Category is 'Other', please specify the event/details:")
+        
         txn_type = st.radio("Transaction Type", ["Expense (Claim)", "Income (Revenue)"])
         amount = st.number_input("Amount (RM)", min_value=0.0, format="%.2f")
         
@@ -54,8 +58,11 @@ with tab1:
         submit = st.form_submit_button("Submit Transaction")
 
         if submit:
+            # FIX: Add strict validation to block empty 'Other' submissions
             if not payee or not description or amount <= 0:
                 st.error("Please fill in all details and ensure the amount is greater than 0.")
+            elif category == "Other" and not other_category.strip():
+                st.error("🚨 You selected 'Other' for the category. Please specify what it is for in the text box!")
             else:
                 with st.spinner("Processing file and updating ledger..."):
                     records = sheet.get_all_records()
@@ -100,8 +107,11 @@ with tab1:
                     expense_val = amount if not is_income else ""
                     new_balance = (last_balance + amount) if is_income else (last_balance - amount)
 
+                    # FIX: Determine which category to actually save to the Google Sheet
+                    final_category = other_category.strip() if category == "Other" else category
+
                     row_data = [
-                        new_id, str(date), description, category,
+                        new_id, str(date), description, final_category, # Uses the new finalized category!
                         f"{income_val:.2f}" if income_val else "",
                         f"{expense_val:.2f}" if expense_val else "",
                         file_id, payee,
@@ -111,7 +121,7 @@ with tab1:
                     
                     sheet.append_row(row_data)
                     st.success(f"✅ Successfully submitted! Tracked as {new_id}")
-
+                    
 # ==========================================
 # TAB 2: MONTHLY RECONCILIATION & EXPORT
 # ==========================================
